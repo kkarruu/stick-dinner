@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dungeon Auto Pets - Prototype</title>
+  </head>
+  <body>
+    <div class="header-bar">
+      <button class="debug-btn" id="debug-toggle-btn" type="button">🛠️ Debug: OFF</button>
+      <div class="stats-bar">
+        💰 Gold: <span id="gold-display">30</span> | 🗺️ Dungeon Floor:
+        <span id="floor-display">1</span>
+      </div>
+    </div>
+
+    <div id="debug-log-panel">
+      <div class="panel-heading">📜 DEBUG SETTINGS</div>
+      <div class="debug-row debug-row-split">
+        <label for="sandbox-checkbox">Sandbox Mode:</label>
+        <input type="checkbox" id="sandbox-checkbox" />
+      </div>
+      <div class="debug-row">
+        <label>Hero Stat Multiplier (<span id="stat-multiplier-val">2</span>x):</label>
+        <input type="range" id="stat-multiplier-slider" min="1" max="10" value="2" step="1" />
+      </div>
+      <div class="debug-row debug-row-split">
+        <label for="infinite-gold-checkbox">Infinite Gold:</label>
+        <input type="checkbox" id="infinite-gold-checkbox" />
+      </div>
+      <div class="panel-heading">📜 DEBUG LOG</div>
+      <div id="debug-log-content">System initialized.<br /></div>
+    </div>
+
+    <div id="sandbox-panel">
+      <div class="sandbox-panel-header">
+        <span>🧪 SANDBOX TOOLBOX</span>
+        <button class="btn btn-small sandbox-close-btn" id="sandbox-panel-close-btn" type="button">✕</button>
+      </div>
+      <div class="sandbox-tabs">
+        <button class="btn btn-small" id="sb-tab-heroes" type="button">Heroes</button>
+        <button class="btn btn-small tab-inactive" id="sb-tab-items" type="button">Items</button>
+        <button class="btn btn-small tab-inactive" id="sb-tab-enemies" type="button">Enemies</button>
+      </div>
+      <div id="sandbox-panel-content"></div>
+    </div>
+
+    <h1>Dungeon Auto Pets</h1>
+
+    <div id="shop-screen" class="screen">
+      <div id="sell-zone">💸 Sell Hero / Dead Body</div>
+
+      <h2>Your Party</h2>
+      <div class="party-manage-row">
+        <div class="inventory-column">
+          <div class="section-label">Inventory</div>
+          <div class="inventory-grid" id="shop-inventory-container"></div>
+        </div>
+        <div class="container" id="party-container"></div>
+      </div>
+
+      <h2>Tavern Shop</h2>
+      <div class="shop-row">
+        <div class="section-group">
+          <div class="section-label">Items (2 💰)</div>
+          <div class="container shop-section" id="item-shop-container"></div>
+        </div>
+        <div class="shop-divider"></div>
+        <div class="section-group">
+          <div class="section-label">Heroes (20 💰)</div>
+          <div class="container shop-section" id="hero-shop-container"></div>
+        </div>
+      </div>
+
+      <div class="shop-controls">
+        <button class="btn btn-small" id="reroll-btn" type="button">🎲 Reroll (1 Gold)</button>
+        <button class="btn" id="enter-dungeon-btn" type="button">Enter the Dungeon</button>
+      </div>
+    </div>
+
+    <div id="sandbox-screen" class="screen hidden">
+      <h2>🧪 Sandbox Test Arena</h2>
+      <p class="muted-copy">
+        Drag heroes, items, or dead bodies from the right panel into your party, or enemies into the
+        enemy lineup.
+      </p>
+
+      <div id="sandbox-delete-zone">🗑️ Drag Unit or Enemy Here to Delete / Sell</div>
+
+      <h3>Sandbox Party Lineup (Up to 5)</h3>
+      <div class="container" id="sandbox-party-container"></div>
+
+      <h3>Sandbox Enemy Lineup (Up to 8)</h3>
+      <div class="container" id="sandbox-enemy-container"></div>
+
+      <div class="shop-controls">
+        <button class="btn btn-battle" id="sandbox-battle-btn" type="button">⚔️ Test Battle</button>
+        <button class="btn btn-small btn-danger" id="sandbox-exit-btn" type="button">Exit Sandbox</button>
+      </div>
+    </div>
+
+    <div id="dungeon-screen" class="screen hidden">
+      <h2 id="dungeon-title">Explore Dungeon Floor 1 (WASD / Arrows to step, Tab for party)</h2>
+      <canvas id="gameCanvas" width="800" height="500" tabindex="1"></canvas>
+    </div>
+
+    <div id="floor-transition-screen" class="screen hidden transition-screen">
+      <h2 class="gold-title">🕳️ Floor Breakthrough!</h2>
+      <p class="transition-copy">
+        You've fallen down a hole in the floor! You tumble deeper into the darkness as the dungeon
+        shifts around you...
+      </p>
+      <button class="btn" id="proceed-floor-btn" type="button">
+        Descend to Floor <span id="next-floor-num">2</span>
+      </button>
+    </div>
+
+    <div id="chest-reward-screen" class="screen hidden">
+      <h2>🎉 Chest Discovered!</h2>
+      <p id="chest-gold-msg" class="gold-msg"></p>
+      <div id="chest-item-container" class="reward-item-wrap">
+        <p id="chest-item-label" class="reward-label"></p>
+        <div class="container reward-slot" id="chest-dropped-item-slot"></div>
+      </div>
+      <h3>Your Party</h3>
+      <div class="party-manage-row">
+        <div class="inventory-column">
+          <div class="section-label">Inventory</div>
+          <div class="inventory-grid" id="chest-inventory-container"></div>
+        </div>
+        <div class="container" id="chest-party-container"></div>
+      </div>
+      <button class="btn" id="chest-return-btn" type="button">Return to Dungeon</button>
+    </div>
+
+    <div id="crate-reward-screen" class="screen hidden">
+      <h2>📦 Crate Discovered!</h2>
+      <div id="crate-item-container" class="reward-item-wrap">
+        <p id="crate-item-label" class="reward-label"></p>
+        <div class="container reward-slot" id="crate-dropped-item-slot"></div>
+      </div>
+      <h3>Your Party (Drop items onto heroes)</h3>
+      <div class="party-manage-row">
+        <div class="inventory-column">
+          <div class="section-label">Inventory</div>
+          <div class="inventory-grid" id="crate-inventory-container"></div>
+        </div>
+        <div class="container" id="crate-party-container"></div>
+      </div>
+      <button class="btn" id="crate-return-btn" type="button">Return to Dungeon</button>
+    </div>
+
+    <div id="hero-encounter-screen" class="screen hidden">
+      <h2>Dungeon Hero Recruitment</h2>
+      <p>You encountered a friendly traveler! Take them into your party for free, or merge them.</p>
+      <div class="leave-behind-zone">🚶 Leave party member behind</div>
+      <div class="party-manage-row">
+        <div class="inventory-column">
+          <div class="section-label">Inventory</div>
+          <div class="inventory-grid" id="encounter-inventory-container"></div>
+        </div>
+        <div class="container" id="encounter-party-container"></div>
+      </div>
+      <h3>Recruit Hero (Free)</h3>
+      <div class="container" id="encounter-hero-container"></div>
+      <button class="btn" id="encounter-return-btn" type="button">Return to Dungeon</button>
+    </div>
+
+    <div id="party-manage-screen" class="screen hidden">
+      <h2>Party Management</h2>
+      <p class="muted-copy">
+        Rearrange your party, use inventory items, or leave a hero behind. Press Tab to return to
+        the dungeon.
+      </p>
+      <div class="leave-behind-zone">🚶 Leave party member behind</div>
+      <div class="party-manage-row">
+        <div class="inventory-column">
+          <div class="section-label">Inventory</div>
+          <div class="inventory-grid" id="party-inventory-container"></div>
+        </div>
+        <div class="container" id="party-manage-party-container"></div>
+      </div>
+      <button class="btn" id="party-return-btn" type="button">Return to Dungeon</button>
+    </div>
+
+    <div id="battle-screen" class="screen hidden">
+      <h2 id="battle-title">BATTLE INITIATED!</h2>
+      <div id="battle-controls-bar">
+        <label class="autoplay-label">
+          <input type="checkbox" id="autoplay-checkbox" checked />
+          Autoplay Battle
+        </label>
+        <div id="vcr-step-controls">
+          <button class="btn btn-small" id="vcr-back-btn" type="button">⬅️ Prev Action</button>
+          <span id="vcr-step-indicator">Turn 1 / Step 1</span>
+          <button class="btn btn-small" id="vcr-fwd-btn" type="button">Next Action ➡️</button>
+        </div>
+      </div>
+      <div class="battle-arena">
+        <div class="battle-team" id="battle-player-team"></div>
+        <div class="vs-label">VS</div>
+        <div class="battle-team" id="battle-enemy-team"></div>
+      </div>
+      <button class="btn" id="battle-return-btn" type="button">Return</button>
+    </div>
+
+    <div id="gameover-screen" class="screen hidden">
+      <h2 class="gameover-title">💀 PARTY WIPED OUT</h2>
+      <p class="gameover-copy">All your heroes have fallen in the dungeon. Your run has ended.</p>
+      <button class="btn" id="play-again-btn" type="button">Play Again</button>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
