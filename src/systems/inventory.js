@@ -18,3 +18,11 @@ export function growInventory(extraSlots = 2) {
 export function inventorySlots() {
   return ensureInventory().slice(0, state.inventorySize);
 }
+
+export function consumeDungeonKey(floor) {
+  const inv = ensureInventory();
+  const idx = inv.findIndex((item) => item?.type === "DUNGEON_KEY" && item.keyFloor === floor);
+  if (idx < 0) return false;
+  inv[idx] = null;
+  return true;
+}

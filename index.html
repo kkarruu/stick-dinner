@@ -28,6 +28,9 @@
         <label for="infinite-gold-checkbox">Infinite Gold:</label>
         <input type="checkbox" id="infinite-gold-checkbox" />
       </div>
+      <div class="debug-row">
+        <button class="debug-btn" id="level-system-boost-btn" type="button">Lvl system boost: OFF</button>
+      </div>
       <div class="panel-heading">📜 DEBUG LOG</div>
       <div id="debug-log-content">System initialized.<br /></div>
     </div>
@@ -51,7 +54,7 @@
       <div id="sell-zone">💸 Sell Hero / Dead Body</div>
 
       <h2>Your Party</h2>
-      <div class="party-manage-row">
+      <div class="party-stage">
         <div class="inventory-column">
           <div class="section-label">Inventory</div>
           <div class="inventory-grid" id="shop-inventory-container"></div>
@@ -123,7 +126,7 @@
         <div class="container reward-slot" id="chest-dropped-item-slot"></div>
       </div>
       <h3>Your Party</h3>
-      <div class="party-manage-row">
+      <div class="party-stage">
         <div class="inventory-column">
           <div class="section-label">Inventory</div>
           <div class="inventory-grid" id="chest-inventory-container"></div>
@@ -140,7 +143,7 @@
         <div class="container reward-slot" id="crate-dropped-item-slot"></div>
       </div>
       <h3>Your Party (Drop items onto heroes)</h3>
-      <div class="party-manage-row">
+      <div class="party-stage">
         <div class="inventory-column">
           <div class="section-label">Inventory</div>
           <div class="inventory-grid" id="crate-inventory-container"></div>
@@ -154,7 +157,7 @@
       <h2>Dungeon Hero Recruitment</h2>
       <p>You encountered a friendly traveler! Take them into your party for free, or merge them.</p>
       <div class="leave-behind-zone">🚶 Leave party member behind</div>
-      <div class="party-manage-row">
+      <div class="party-stage">
         <div class="inventory-column">
           <div class="section-label">Inventory</div>
           <div class="inventory-grid" id="encounter-inventory-container"></div>
@@ -173,7 +176,7 @@
         the dungeon.
       </p>
       <div class="leave-behind-zone">🚶 Leave party member behind</div>
-      <div class="party-manage-row">
+      <div class="party-stage">
         <div class="inventory-column">
           <div class="section-label">Inventory</div>
           <div class="inventory-grid" id="party-inventory-container"></div>

@@ -1,12 +1,12 @@
 import { SCREEN } from "../../data/constants.js";
 import { state } from "../../state/gameState.js";
 import { addGold } from "../shop.js";
-import { grantPartyBattleExp, livingPartyCount } from "../heroes.js";
+import { grantPartyBattleExp, livingPartyCount, snapshotPartyExp } from "../heroes.js";
 import { logDebug } from "../debug.js";
 import { simulateBattle } from "./engine.js";
 import { setPlaybackAutoplay, startPlayback, stepBackward, stepForward, stopPlayback } from "./playback.js";
 import { refresh } from "../../ui/refresh.js";
-import { renderBattleFrame } from "../../ui/battleView.js";
+import { renderBattleFrame, playBattleExpReveal } from "../../ui/battleView.js";
 import { $ } from "../../ui/dom.js";
 import { showScreen } from "../../ui/screens.js";
 import { drawGridDungeon, focusDungeon } from "../../ui/dungeonCanvas.js";
@@ -19,15 +19,16 @@ function applyPartyUpdates(partyList, updates) {
     hero.armor = update.armor;
     hero.currentMana = update.currentMana;
     hero.currentEnergy = update.currentEnergy;
+    hero.currentRage = update.currentRage ?? hero.currentRage;
     hero.perk = update.perk;
   }
 }
 
-function persistBattle(result) {
+function persistBattle(result, { grantExp = true } = {}) {
   if (state.pendingBattleResult?.applied) return;
   if (!state.isSandboxBattle) {
     applyPartyUpdates(state.party, result.partyUpdates);
-    if (result.battleExp) {
+    if (grantExp && result.battleExp) {
       grantPartyBattleExp(state.party, result.battleExp);
       logDebug(`[EXP] Living party gained ${result.battleExp} battle EXP.`);
     }
@@ -65,19 +66,31 @@ export function beginBattle({ enemies, sourceParty, isSandbox, monsterIndices = 
   const title = $("battle-title");
   if (title) title.textContent = "BATTLE INITIATED!";
 
+  let lastFrame = null;
   startPlayback(frames, {
     autoplay: state.autoplayActive,
     onFrame(frame, index, total) {
+      lastFrame = frame;
       if (frame.title && title) title.textContent = frame.title;
       renderBattleFrame(frame);
       const indicator = $("vcr-step-indicator");
       if (indicator) indicator.textContent = `Step ${index + 1} / ${total}`;
     },
     onDone(result) {
-      persistBattle(result);
+      persistBattle(result, { grantExp: false });
       if (title) title.textContent = result.message;
-      if (returnBtn) returnBtn.style.display = "block";
-      refresh();
+      const finishUi = () => {
+        if (returnBtn) returnBtn.style.display = "block";
+        refresh();
+      };
+      if (state.isSandboxBattle || !result.battleExp) {
+        finishUi();
+        return;
+      }
+      const snaps = snapshotPartyExp(state.party);
+      grantPartyBattleExp(state.party, result.battleExp);
+      logDebug(`[EXP] Living party gained ${result.battleExp} battle EXP.`);
+      playBattleExpReveal(lastFrame, snaps).then(finishUi);
     },
   });
 }

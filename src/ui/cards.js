@@ -1,10 +1,13 @@
 import { MAX_HERO_LEVEL } from "../data/constants.js";
+import { enemyAbilityText } from "../data/enemies.js";
 import { state } from "../state/gameState.js";
 import {
   calculateHeroStats,
+  formatHpText,
   expToNextLevel,
   getHeroMaxEnergy,
   getHeroMaxMana,
+  getHeroMaxRage,
   isHeroDead,
 } from "../systems/heroes.js";
 import { append, el } from "./dom.js";
@@ -27,6 +30,15 @@ function expBar(hero) {
 
 function resourceBar(hero) {
   if (!state.manaModeActive || isHeroDead(hero)) return null;
+  if (hero.hasRage) {
+    const maxR = getHeroMaxRage(hero);
+    const currentR = hero.currentRage || 0;
+    const segs = [];
+    for (let i = 0; i < maxR; i += 1) {
+      segs.push(el("div", { class: `resource-segment${i < currentR ? " rage-filled" : ""}` }));
+    }
+    return el("div", { class: "resource-bar-container", title: `Rage: ${currentR}/${maxR}` }, ...segs);
+  }
   if (hero.hasEnergy) {
     const maxE = getHeroMaxEnergy(hero);
     const currentE = hero.currentEnergy || 0;
@@ -98,7 +110,7 @@ export function renderHeroCard(hero, { source, index, context = "shop", emptyTex
       "div",
       { class: "stats" },
       el("span", { class: "atk" }, `⚔️${stats.atk}`),
-      el("span", { class: "hp" }, dead ? "💀" : `❤️${stats.hp}`),
+      el("span", { class: "hp" }, formatHpText(stats)),
     ),
   );
 
@@ -171,13 +183,13 @@ export function renderEnemyCard(
       "div",
       { class: "ability-box" },
       el("span", { class: "ability-title" }, enemy.ability ? "Ability:" : ""),
-      el("span", { class: "ability-desc" }, enemy.ability === "SPLIT" ? "Splits" : "Standard"),
+      el("span", { class: "ability-desc" }, enemyAbilityText(enemy)),
     ),
     el(
       "div",
       { class: "stats" },
       el("span", { class: "atk" }, `⚔️${enemy.atk}`),
-      el("span", { class: "hp" }, `❤️${enemy.hp}`),
+      el("span", { class: "hp" }, `❤️${enemy.hp}/${enemy.maxHp ?? enemy.hp}`),
     ),
   );
   bindDragSource(card, source, index);
@@ -211,7 +223,7 @@ export function renderSandboxPoolHero(hero, index) {
       "div",
       { class: "stats" },
       el("span", { class: "atk" }, `⚔️${statsAtk}`),
-      el("span", { class: "hp" }, `❤️${statsHp}`),
+      el("span", { class: "hp" }, `❤️${statsHp}/${statsHp}`),
     ),
   );
   bindDragSource(card, "sandboxPoolHero", index);

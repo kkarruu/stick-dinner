@@ -1,6 +1,6 @@
 import { DELAY } from "../../data/constants.js";
-import { scaledByLevel } from "../../data/heroes.js";
-import { getHeroMaxEnergy, getHeroMaxMana } from "../heroes.js";
+import { isLevelSystemBoost, scaledByLevel } from "../../data/heroes.js";
+import { gainArmor, getHeroMaxEnergy, getHeroMaxMana, getHeroMaxRage, percentOfStat } from "../heroes.js";
 import { logDebug } from "../debug.js";
 
 function isEnergyReady(hero) {
@@ -14,7 +14,11 @@ export function spendEnergy(hero) {
 export function applyCookBuff(combatPlayer, summoned, isUnitDead) {
   const cook = combatPlayer.find((hero) => hero && hero.name === "The Cook" && !isUnitDead(hero));
   if (!cook) return;
-  summoned.hp += scaledByLevel(cook.level, 1, 2, 3);
+  const extra = isLevelSystemBoost()
+    ? scaledByLevel(cook.level, 1, 2, 3)
+    : percentOfStat(cook.hp, 0.5);
+  summoned.hp += extra;
+  summoned.maxHp = (summoned.maxHp || summoned.hp - extra) + extra;
 }
 
 export function makeMinion(name, emoji, atk, hp) {
@@ -30,9 +34,11 @@ export function makeMinion(name, emoji, atk, hp) {
     abilityDesc: "",
     atk,
     hp,
+    maxHp: hp,
     isDeadInCombat: false,
     hasMana: false,
     hasEnergy: false,
+    hasRage: false,
     isMinion: true,
     isReanimated: false,
     sourcePartyIndex: null,
@@ -50,12 +56,14 @@ function reanimateCorpse(corpse, hp) {
   corpse.isDeadInCombat = false;
   corpse.isReanimated = true;
   corpse.hp = hp;
+  corpse.maxHp = hp;
   corpse.perk = null;
   corpse.ability = null;
   corpse.abilityTitle = "";
   corpse.abilityDesc = "";
   corpse.hasMana = false;
   corpse.hasEnergy = false;
+  corpse.hasRage = false;
   corpse.currentMana = 0;
   corpse.currentEnergy = 0;
 }
@@ -112,8 +120,13 @@ export const startOfBattlePhases = [
         const hero = combatPlayer[i];
         if (isUnitDead(hero) || hero.name !== "Beast Tamer" || !isEnergyReady(hero)) continue;
         spendEnergy(hero);
-        const boarStat = scaledByLevel(hero.level, 1, 2, 3);
-        const boar = makeMinion("Boar", "🐗", boarStat, boarStat);
+        const boarAtk = isLevelSystemBoost()
+          ? scaledByLevel(hero.level, 1, 2, 3)
+          : percentOfStat(hero.atk, 0.25);
+        const boarHp = isLevelSystemBoost()
+          ? scaledByLevel(hero.level, 1, 2, 3)
+          : percentOfStat(hero.hp, 0.25);
+        const boar = makeMinion("Boar", "🐗", boarAtk, boarHp);
         applyCookBuff(combatPlayer, boar, isUnitDead);
         combatPlayer.push(boar);
         emit({ pulseIdx: i, delay: DELAY.ability });
@@ -146,15 +159,40 @@ export const startOfBattlePhases = [
         if (isUnitDead(hero) || hero.name !== "Archer" || !isEnergyReady(hero)) continue;
         if (combatEnemy.length === 0) break;
         spendEnergy(hero);
-        const dmg = scaledByLevel(hero.level, 1, 2, 3);
-        combatEnemy[0].hp -= dmg;
+        const dmg = isLevelSystemBoost()
+          ? scaledByLevel(hero.level, 1, 2, 3)
+          : percentOfStat(hero.atk, 0.25);
+        const targetIdx = Math.floor(Math.random() * combatEnemy.length);
+        combatEnemy[targetIdx].hp -= dmg;
         emit({
           pulseIdx: i,
-          specificEnemyIdx: 0,
+          specificEnemyIdx: targetIdx,
           specificEnemyDmg: dmg,
           delay: DELAY.ability,
         });
-        ctx.killEnemyIfDead?.(0);
+        ctx.killEnemyIfDead?.(targetIdx);
+      }
+    },
+  },
+  {
+    id: "skeletalArcher",
+    run(ctx) {
+      const { combatEnemy, combatPlayer, isUnitDead, emit, applyHpLoss } = ctx;
+      for (let ei = 0; ei < combatEnemy.length; ei += 1) {
+        const enemy = combatEnemy[ei];
+        if (enemy.ability !== "OPENING_SHOT") continue;
+        const living = [];
+        combatPlayer.forEach((unit, idx) => {
+          if (!isUnitDead(unit)) living.push(idx);
+        });
+        if (living.length === 0) continue;
+        const pick = living[Math.floor(Math.random() * living.length)];
+        applyHpLoss?.(combatPlayer[pick], 1, false);
+        emit({
+          specificPlayerIdx: pick,
+          specificPlayerDmg: 1,
+          delay: DELAY.ability,
+        });
       }
     },
   },
@@ -162,7 +200,7 @@ export const startOfBattlePhases = [
 
 export const manaAbilities = {
   SELF_ARMOR(ctx, hero) {
-    hero.armor = (hero.armor || 0) + scaledByLevel(hero.level, 1, 2, 3);
+    gainArmor(hero, scaledByLevel(hero.level, 1, 2, 3));
   },
   MIND_CONTROL(ctx, hero, heroIdx) {
     if (ctx.mindControlledMonster || ctx.combatEnemy.length === 0) return;
@@ -173,19 +211,53 @@ export const manaAbilities = {
     };
     ctx.emit({ pulseIdx: heroIdx, mcSlide: true, delay: DELAY.mindControl });
   },
+  FIRE_WAVE(ctx, hero, heroIdx) {
+    const { combatPlayer, combatEnemy, isUnitDead, emit, applyHpLoss, killEnemyIfDead } = ctx;
+    const dmg = percentOfStat(hero.atk, 0.25);
+    const playerHits = [];
+    const enemyHits = [];
+    for (let i = heroIdx + 1; i < combatPlayer.length; i += 1) {
+      const unit = combatPlayer[i];
+      if (isUnitDead(unit)) continue;
+      applyHpLoss(unit, dmg, false);
+      if (isUnitDead(unit)) unit.isDeadInCombat = true;
+      playerHits.push({ idx: i, dmg });
+    }
+    for (let i = combatEnemy.length - 1; i >= 0; i -= 1) {
+      combatEnemy[i].hp -= dmg;
+      enemyHits.push({ idx: i, dmg });
+      killEnemyIfDead?.(i);
+    }
+    logDebug(`[FIRE MAGE] Fire wave for ${dmg} to the right.`);
+    emit({ pulseIdx: heroIdx, playerHits, enemyHits, delay: DELAY.ability });
+  },
 };
 
-export function tickVanguard(combatPlayer, { manaMode, isMcAttacking, hpLoss, isUnitDead }) {
-  if (!manaMode || isMcAttacking || hpLoss <= 0) return;
-  for (const hero of combatPlayer) {
-    if (isUnitDead(hero) || hero.name !== "Vanguard" || !hero.hasEnergy) continue;
-    if ((hero.currentEnergy || 0) >= getHeroMaxEnergy(hero)) {
-      hero.currentEnergy = 0;
-      hero.bonusHp += 1;
-      hero.hp = (hero.hp || 0) + 1;
-      logDebug("[VANGUARD] Front hero took damage! Vanguard gained +1 HP and reset energy.");
-    }
+export function tickVanguard(combatPlayer, { manaMode, isMcAttacking, hpLoss, damagedUnit, isUnitDead }) {
+  if (!manaMode || isMcAttacking || hpLoss <= 0 || !damagedUnit) return;
+  const damagedIdx = combatPlayer.indexOf(damagedUnit);
+  if (damagedIdx <= 0) return;
+  const hero = combatPlayer[damagedIdx - 1];
+  if (isUnitDead(hero) || hero.name !== "Vanguard" || !hero.hasEnergy) return;
+  if ((hero.currentEnergy || 0) >= getHeroMaxEnergy(hero)) {
+    hero.currentEnergy = 0;
+    hero.bonusHp += 1;
+    hero.hp = (hero.hp || 0) + 1;
+    logDebug("[VANGUARD] Right hero took damage! Vanguard gained +1 HP.");
   }
 }
 
-export { getHeroMaxMana, getHeroMaxEnergy };
+export function tickRage(hero, { manaMode, isMcAttacking, emit }) {
+  if (!manaMode || isMcAttacking || !hero?.hasRage) return;
+  const maxRage = getHeroMaxRage(hero);
+  if (maxRage <= 0) return;
+  hero.currentRage = (hero.currentRage || 0) + 1;
+  if (hero.currentRage >= maxRage) {
+    hero.currentRage = 0;
+    gainArmor(hero, scaledByLevel(hero.level, 1, 2, 3));
+    emit?.({ pulseIdx: -1, delay: DELAY.ability });
+    logDebug(`[RAGE] ${hero.name} rage filled! Gained armor.`);
+  }
+}
+
+export { getHeroMaxMana, getHeroMaxEnergy, getHeroMaxRage };

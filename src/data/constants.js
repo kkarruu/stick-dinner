@@ -34,7 +34,8 @@ export const MAX_BATTLE_TURNS = 80;
 
 export const CRATE_CHANCE = 0.3;
 export const TRAVELER_CHANCE = 0.18;
-export const MONSTER_CLUSTER_BASE = 0.3;
+export const LOCKED_DOOR_CHANCE = 0.22;
+export const TREASURE_HERO_CHANCE = 0.12;
 
 export const SCREEN = {
   SHOP: "SHOP",
@@ -81,4 +82,7 @@ export const DELAY = {
   lunge: 400,
   clash: 1000,
   turnGap: 800,
+  expTick: 45,
+  expReveal: 280,
+  levelUpHold: 700,
 };

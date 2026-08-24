@@ -22,6 +22,14 @@ export function setDebugMode(enabled) {
   panel.style.display = enabled ? "block" : "none";
 }
 
+export function syncLevelSystemBoostButton() {
+  const btn = $("level-system-boost-btn");
+  if (!btn) return;
+  const on = !!state.levelSystemBoost;
+  btn.textContent = on ? "Lvl system boost: ON" : "Lvl system boost: OFF";
+  btn.classList.toggle("active", on);
+}
+
 export function toggleDebugMode() {
   setDebugMode(!state.debugMode);
 }

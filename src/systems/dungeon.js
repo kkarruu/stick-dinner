@@ -6,10 +6,10 @@ import {
   ROOMS_PER_FLOOR,
   SCREEN,
   TRAVELER_CHANCE,
-  MONSTER_CLUSTER_BASE,
+  LOCKED_DOOR_CHANCE,
+  TREASURE_HERO_CHANCE,
   CHEST_GOLD,
 } from "../data/constants.js";
-import { getDungeonMonsterPool, cloneEnemy } from "../data/enemies.js";
 import { state, resetRoom } from "../state/gameState.js";
 import { createRandomHero, getRandomItem, isHeroDead } from "./heroes.js";
 import { addGold, rollShop } from "./shop.js";
@@ -17,6 +17,8 @@ import { beginBattle } from "./combat/index.js";
 import { showScreen } from "../ui/screens.js";
 import { drawGridDungeon, focusDungeon } from "../ui/dungeonCanvas.js";
 import { refresh } from "../ui/refresh.js";
+import { spawnRoomMonsters, moveMonsterPacks } from "./dungeonSpawn.js";
+import { consumeDungeonKey } from "./inventory.js";
 
 function inBounds(x, y) {
   return x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT;
@@ -38,6 +40,10 @@ function occupiedSet() {
   if (state.room.chest) add(state.room.chest.x, state.room.chest.y);
   if (state.room.crate) add(state.room.crate.x, state.room.crate.y);
   if (state.room.traveler) add(state.room.traveler.x, state.room.traveler.y);
+  if (state.room.lockedDoor) add(state.room.lockedDoor.x, state.room.lockedDoor.y);
+  for (const loot of state.room.loot || []) {
+    if (!loot.collected) add(loot.x, loot.y);
+  }
   return spots;
 }
 
@@ -63,6 +69,28 @@ function buildPlayerSnake() {
     y: startY,
     heroRef: hero,
   }));
+}
+
+function enterTreasureRoom() {
+  state.room.monsters = [];
+  state.room.chest = null;
+  state.room.crate = null;
+  state.room.lockedDoor = null;
+  state.room.isTreasureRoom = true;
+  state.room.loot = [];
+  const count = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < count; i += 1) {
+    const kind = Math.random() < 0.5 ? "chest" : "crate";
+    state.room.loot.push({
+      ...getSafeGridSpawn(),
+      kind,
+      collected: false,
+      color: kind === "chest" ? "#f1c40f" : "#e67e22",
+    });
+  }
+  if (Math.random() < TREASURE_HERO_CHANCE) {
+    state.room.traveler = { ...getSafeGridSpawn(), color: "#9b59b6", collected: false };
+  }
 }
 
 export function generateNewRoom() {
@@ -104,36 +132,11 @@ export function generateNewRoom() {
     state.room.traveler = { ...getSafeGridSpawn(), color: "#9b59b6", collected: false };
   }
 
-  const monsterPool = getDungeonMonsterPool(state.dungeonFloor);
-  const spawnPos1 = getSafeGridSpawn();
-  const template1 = monsterPool[Math.floor(Math.random() * monsterPool.length)];
-  state.room.monsters.push({
-    x: spawnPos1.x,
-    y: spawnPos1.y,
-    ...cloneEnemy(template1),
-  });
-
-  const clusterChance = Math.min(
-    0.8,
-    MONSTER_CLUSTER_BASE + state.dungeonFloor * 0.1 + state.floorRoomsCount * 0.03,
-  );
-  if (Math.random() < clusterChance) {
-    const adjX = Math.min(
-      GRID_WIDTH - 1,
-      Math.max(0, spawnPos1.x + (Math.random() > 0.5 ? 1 : -1)),
-    );
-    const adjY = Math.min(GRID_HEIGHT - 1, Math.max(0, spawnPos1.y + (Math.random() > 0.5 ? 1 : -1)));
-    const blocked =
-      isObstacle(adjX, adjY) || state.room.monsters.some((monster) => monster.x === adjX && monster.y === adjY);
-    if (!blocked) {
-      const template2 = monsterPool[Math.floor(Math.random() * monsterPool.length)];
-      state.room.monsters.push({
-        x: adjX,
-        y: adjY,
-        ...cloneEnemy(template2),
-      });
-    }
+  if (Math.random() < LOCKED_DOOR_CHANCE) {
+    state.room.lockedDoor = { ...getSafeGridSpawn(), color: "#8e44ad" };
   }
+
+  state.room.monsters = spawnRoomMonsters(getSafeGridSpawn, state.dungeonFloor, state.floorRoomsCount);
 
   const title = document.getElementById("dungeon-title");
   if (title) {
@@ -199,45 +202,33 @@ export function returnToDungeon() {
   refresh();
 }
 
+function expandPackIndices(indices) {
+  const set = new Set(indices);
+  for (const idx of indices) {
+    const packId = state.room.monsters[idx]?.packId;
+    if (!packId) continue;
+    state.room.monsters.forEach((monster, i) => {
+      if (monster.packId === packId) set.add(i);
+    });
+  }
+  return [...set];
+}
+
 function startClusterBattle(indices) {
+  const packed = expandPackIndices(indices);
   state.inBattleTransition = true;
-  state.activeEnemyIndices = indices;
+  state.activeEnemyIndices = packed;
   beginBattle({
-    enemies: indices.map((i) => state.room.monsters[i]),
+    enemies: packed.map((i) => state.room.monsters[i]),
     sourceParty: state.party,
     isSandbox: false,
-    monsterIndices: indices,
+    monsterIndices: packed,
   });
 }
 
 function moveMonsters() {
   const head = state.playerSnake[0];
-  for (const monster of state.room.monsters) {
-    if (monster.ai === "CHASE") {
-      const dx = Math.sign(head.x - monster.x);
-      const dy = Math.sign(head.y - monster.y);
-      const tx = monster.x + (Math.random() > 0.5 ? dx : 0);
-      const ty = monster.y + (Math.random() > 0.5 ? dy : 0);
-      if (!isObstacle(tx, ty)) {
-        monster.x = tx;
-        monster.y = ty;
-      }
-    } else if (monster.ai === "WANDER") {
-      const dirs = [
-        { x: 0, y: 1 },
-        { x: 0, y: -1 },
-        { x: 1, y: 0 },
-        { x: -1, y: 0 },
-      ];
-      const dir = dirs[Math.floor(Math.random() * dirs.length)];
-      const tx = monster.x + dir.x;
-      const ty = monster.y + dir.y;
-      if (!isObstacle(tx, ty)) {
-        monster.x = tx;
-        monster.y = ty;
-      }
-    }
-  }
+  moveMonsterPacks(head, isObstacle);
 
   const hits = [];
   state.room.monsters.forEach((monster, idx) => {
@@ -252,6 +243,20 @@ export function stepDungeon(dx, dy) {
   const nx = head.x + dx;
   const ny = head.y + dy;
   if (isObstacle(nx, ny)) return;
+
+  if (state.room.lockedDoor && state.room.lockedDoor.x === nx && state.room.lockedDoor.y === ny) {
+    if (!consumeDungeonKey(state.dungeonFloor)) return;
+    const prev = state.playerSnake.map((part) => ({ x: part.x, y: part.y }));
+    state.playerSnake[0].x = nx;
+    state.playerSnake[0].y = ny;
+    for (let i = 1; i < state.playerSnake.length; i += 1) {
+      state.playerSnake[i].x = prev[i - 1].x;
+      state.playerSnake[i].y = prev[i - 1].y;
+    }
+    enterTreasureRoom();
+    drawGridDungeon();
+    return;
+  }
 
   const prev = state.playerSnake.map((part) => ({ x: part.x, y: part.y }));
   state.playerSnake[0].x = nx;
@@ -294,6 +299,13 @@ export function stepDungeon(dx, dy) {
   if (state.room.crate && !state.room.crate.collected && state.room.crate.x === nx && state.room.crate.y === ny) {
     state.room.crate.collected = true;
     triggerCrateReward();
+    return;
+  }
+  const loot = (state.room.loot || []).find((entry) => !entry.collected && entry.x === nx && entry.y === ny);
+  if (loot) {
+    loot.collected = true;
+    if (loot.kind === "crate") triggerCrateReward();
+    else triggerChestReward();
     return;
   }
   if (

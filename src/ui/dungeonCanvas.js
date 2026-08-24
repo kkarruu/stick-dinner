@@ -76,7 +76,35 @@ export function drawGridDungeon() {
     );
   }
 
-  ctx.font = "24px sans-serif";
+  if (state.room.lockedDoor) {
+    ctx.fillStyle = state.room.lockedDoor.color || "#8e44ad";
+    ctx.fillRect(
+      state.room.lockedDoor.x * TILE_SIZE + 8,
+      state.room.lockedDoor.y * TILE_SIZE + 8,
+      TILE_SIZE - 16,
+      TILE_SIZE - 16,
+    );
+    ctx.font = "20px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(
+      "🔒",
+      state.room.lockedDoor.x * TILE_SIZE + TILE_SIZE / 2,
+      state.room.lockedDoor.y * TILE_SIZE + TILE_SIZE / 2,
+    );
+  }
+
+  for (const loot of state.room.loot || []) {
+    if (loot.collected) continue;
+    ctx.fillStyle = loot.color;
+    const pad = loot.kind === "crate" ? 10 : 8;
+    ctx.fillRect(
+      loot.x * TILE_SIZE + pad,
+      loot.y * TILE_SIZE + pad,
+      TILE_SIZE - pad * 2,
+      TILE_SIZE - pad * 2,
+    );
+  }
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (const monster of state.room.monsters) {

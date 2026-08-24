@@ -20,6 +20,9 @@ function createRoom() {
     chest: null,
     crate: null,
     traveler: null,
+    lockedDoor: null,
+    loot: [],
+    isTreasureRoom: false,
     monsters: [],
     obstacles: [],
   };
@@ -33,6 +36,7 @@ export function createInitialState() {
     floorRoomsCount: 0,
     statMultiplier: STAT_MULTIPLIER_DEFAULT,
     debugMode: false,
+    levelSystemBoost: false,
     sandboxActive: false,
     infiniteGoldActive: false,
     hardcoreModeActive: true,

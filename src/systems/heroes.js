@@ -5,17 +5,23 @@ import { MAX_HERO_LEVEL, EXP_BASE, EXP_GROWTH } from "../data/constants.js";
 import { state } from "../state/gameState.js";
 import { logDebug } from "./debug.js";
 
+export function getHeroMaxRage(hero) {
+  if (!hero?.hasRage) return 0;
+  if (hero.name === "Knight") return 3;
+  return hero.baseMaxRage || 3;
+}
+
 export function getHeroMaxMana(hero) {
   if (!hero?.hasMana) return 0;
-  if (hero.name === "Knight") return 3;
-  if (hero.name === "Shadow Priest") return 5;
+  if (hero.name === "Shadow Priest" || hero.name === "Shadow Priest") return 5;
+  if (hero.name === "Fire Mage" || hero.name === "Fire Mage") return 5;
   return hero.baseMaxMana || 0;
 }
 
 export function getHeroMaxEnergy(hero) {
   if (!hero?.hasEnergy) return 0;
   if (hero.name === "Vanguard") return 2;
-  if (hero.name === "Beast Tamer") return 2;
+  if (hero.name === "Beast Tamer") return 3;
   if (hero.name === "Archer") return 3;
   if (hero.name === "Monk") return 4;
   return hero.baseMaxEnergy || 2;
@@ -23,7 +29,7 @@ export function getHeroMaxEnergy(hero) {
 
 export function getHeroStructuredDescription(hero) {
   const template = HERO_POOL.find((entry) => entry.name === hero.name);
-  if (template?.describe) return template.describe(hero.level || 1);
+  if (template?.describe) return template.describe(hero);
   return { title: "", desc: "" };
 }
 
@@ -34,10 +40,36 @@ function withAbilityText(hero) {
   return hero;
 }
 
+export function refreshAllAbilityText() {
+  for (const list of [state.party, state.shopHeroes, state.sandboxParty]) {
+    if (!list) continue;
+    for (const hero of list) {
+      if (hero) withAbilityText(hero);
+    }
+  }
+}
+
+export function percentOfStat(value, percent) {
+  return Math.max(1, Math.round((Number(value) || 0) * percent));
+}
+
+export function gainArmor(unit, amount) {
+  const n = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!unit || n <= 0) return 0;
+  const doubled = unit.name === "Blacksmith" || unit.ability === "ARMOR_DOUBLE";
+  const gained = doubled ? n * 2 : n;
+  unit.armor = (unit.armor || 0) + gained;
+  return gained;
+}
+
+export function getHeroMaxHp(hero, multiplier = state.statMultiplier) {
+  if (!hero) return 0;
+  return (hero.baseHp + (hero.levelUpHp || 0)) * multiplier + (hero.bonusHp || 0);
+}
+
 export function isHeroDead(hero, multiplier = state.statMultiplier) {
   if (!hero) return true;
-  const maxHp = (hero.baseHp + (hero.levelUpHp || 0)) * multiplier + (hero.bonusHp || 0);
-  return maxHp - (hero.permanentDamage || 0) <= 0;
+  return getHeroMaxHp(hero, multiplier) - (hero.permanentDamage || 0) <= 0;
 }
 
 export function calculateHeroStats(hero, multiplier = state.statMultiplier) {
@@ -46,9 +78,32 @@ export function calculateHeroStats(hero, multiplier = state.statMultiplier) {
     0,
     Math.round((hero.baseAtk + (hero.levelUpAtk || 0)) * multiplier + (hero.bonusAtk || 0)),
   );
-  if (dead) return { atk, hp: 1, isDead: true };
-  const maxHp = (hero.baseHp + (hero.levelUpHp || 0)) * multiplier + (hero.bonusHp || 0);
-  return { atk, hp: maxHp - (hero.permanentDamage || 0), isDead: false };
+  const maxHp = getHeroMaxHp(hero, multiplier);
+  if (dead) return { atk, hp: 0, maxHp, isDead: true };
+  return { atk, hp: maxHp - (hero.permanentDamage || 0), maxHp, isDead: false };
+}
+
+export function formatHpText({ hp, maxHp, isDead }, { showSkull = true } = {}) {
+  if (isDead && showSkull) return "💀";
+  const current = Math.max(0, hp ?? 0);
+  const max = Math.max(current, maxHp ?? current);
+  return `❤️${current}/${max}`;
+}
+
+export function healHero(hero, amount) {
+  const heal = Math.max(0, Math.floor(amount) || 0);
+  if (!hero || heal <= 0 || isHeroDead(hero)) return 0;
+  const missing = hero.permanentDamage || 0;
+  if (missing <= 0) return 0;
+  const applied = Math.min(heal, missing);
+  hero.permanentDamage = missing - applied;
+  return applied;
+}
+
+export function addHeroMaxHp(hero, amount) {
+  const gain = Math.max(0, Math.floor(amount) || 0);
+  if (!hero || gain <= 0) return;
+  hero.bonusHp = (hero.bonusHp || 0) + gain;
 }
 
 export function createHeroFromTemplate(template, options = {}) {
@@ -61,8 +116,10 @@ export function createHeroFromTemplate(template, options = {}) {
     ability: template.ability,
     hasMana: !!template.hasMana,
     hasEnergy: !!template.hasEnergy,
+    hasRage: !!template.hasRage,
     baseMaxMana: template.baseMaxMana || 0,
     baseMaxEnergy: template.baseMaxEnergy || 0,
+    baseMaxRage: template.baseMaxRage || 0,
     perk: null,
     armor: 0,
     level: 1,
@@ -74,6 +131,7 @@ export function createHeroFromTemplate(template, options = {}) {
     permanentDamage: 0,
     currentMana: 0,
     currentEnergy: 0,
+    currentRage: 0,
     ...options,
   };
   if (hero.hasMana) hero.currentMana = getHeroMaxMana(hero);
@@ -144,6 +202,14 @@ export function grantHeroExp(hero, amount) {
   return gained;
 }
 
+export function snapshotPartyExp(partyList = state.party) {
+  return partyList.map((hero) =>
+    hero
+      ? { level: hero.level || 1, exp: hero.exp || 0, dead: isHeroDead(hero) }
+      : null,
+  );
+}
+
 export function grantPartyBattleExp(partyList, amount) {
   if (!amount) return;
   for (const hero of partyList) {
@@ -159,10 +225,19 @@ export function handleMerge(baseHero, fedHero) {
 }
 
 export function applyItemToHero(targetHero, item) {
-  if (!targetHero || !item) return;
+  if (!targetHero || !item || item.type === "DUNGEON_KEY") return false;
   if (item.type === "POTION") {
     targetHero.bonusAtk += 1;
-    targetHero.bonusHp += 1;
+    addHeroMaxHp(targetHero, 1);
+  } else if (item.type === "FOOD_ATK") {
+    targetHero.bonusAtk += item.atkVal || 1;
+  } else if (item.type === "FOOD_HP") {
+    addHeroMaxHp(targetHero, item.hpVal || 1);
+  } else if (item.type === "FOOD_BOTH") {
+    targetHero.bonusAtk += item.atkVal || 1;
+    addHeroMaxHp(targetHero, item.hpVal || 1);
+  } else if (item.type === "HEAL") {
+    healHero(targetHero, item.healVal || 0);
   } else if (item.type === "RING") {
     targetHero.perk = {
       name: "Cursed Skeleton",
@@ -192,9 +267,9 @@ export function applyItemToHero(targetHero, item) {
     targetHero.bonusAtk += 5;
   } else if (item.type === "FEAST") {
     targetHero.bonusAtk += 3;
-    targetHero.bonusHp += 3;
+    addHeroMaxHp(targetHero, 3);
   } else if (item.type === "STACK_ARMOR") {
-    targetHero.armor = (targetHero.armor || 0) + item.armorVal;
+    gainArmor(targetHero, item.armorVal || 1);
   } else if (item.type === "MANA_GAIN") {
     targetHero.perk = {
       name: item.name,
@@ -203,12 +278,14 @@ export function applyItemToHero(targetHero, item) {
       type: "MANA_GAIN",
       manaPerTurn: item.manaPerTurn || 2,
     };
-  } else if (item.type === "EXP_POTION") {
-    grantHeroExp(targetHero, item.expAmount || 0);
+  } else if (item.type === "EXP_POTION" || item.type === "EXP_POTION") {
+    grantHeroExp(targetHero, item.expAmount || item.expAmount || 0);
   }
+  triggerBardItemUsed(state.party);
+  return true;
 }
 
-export function triggerBardItemBought(partyList = state.party) {
+export function triggerBardItemUsed(partyList = state.party) {
   const living = partyList.filter((hero) => hero && !isHeroDead(hero) && hero.name === "Bard");
   for (const bard of living) {
     const amount = scaledByLevel(bard.level, 1, 2, 3);
@@ -216,8 +293,12 @@ export function triggerBardItemBought(partyList = state.party) {
     if (targets.length === 0) continue;
     const target = targets[Math.floor(Math.random() * targets.length)];
     target.bonusAtk += amount;
-    logDebug(`[BARD] Item bought! ${target.name} gained +${amount} Atk.`);
+    logDebug(`[BARD] Item used! ${target.name} gained +${amount} Atk.`);
   }
+}
+
+export function triggerBardItemBought(partyList = state.party) {
+  triggerBardItemUsed(partyList);
 }
 
 export function triggerWarlockSellBuff(soldHero, partyList) {
@@ -238,10 +319,20 @@ export function cycleSandboxLevel(hero) {
 
 export function getRandomItem(specificTier = null, floor = state.dungeonFloor) {
   const allowedTier = specificTier !== null ? specificTier : floor;
-  let pool = ITEM_POOL.filter((item) => item.tier <= allowedTier);
+  let pool = ITEM_POOL.filter((item) => {
+    if (item.tier > allowedTier) return false;
+    if (item.type === "DUNGEON_KEY") return item.keyFloor === floor;
+    return true;
+  });
   if (pool.length === 0) pool = ITEM_POOL.filter((item) => item.tier === 1);
   if (pool.length === 0) pool = ITEM_POOL;
-  return { ...pool[Math.floor(Math.random() * pool.length)] };
+  const total = pool.reduce((sum, item) => sum + (item.weight ?? 1), 0);
+  let roll = Math.random() * total;
+  for (const item of pool) {
+    roll -= item.weight ?? 1;
+    if (roll <= 0) return { ...item };
+  }
+  return { ...pool[pool.length - 1] };
 }
 
 export function livingPartyCount(partyList = state.party) {

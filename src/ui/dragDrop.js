@@ -87,13 +87,16 @@ export function handlePartyDrop(targetIndex, context = "shop") {
       clearDrag();
       return;
     }
+    if (item.type === "DUNGEON_KEY") {
+      clearDrag();
+      return;
+    }
     if (source === "item") {
       if (!canSpend(ITEM_COST)) {
         clearDrag();
         return;
       }
       spendGold(ITEM_COST);
-      triggerBardItemBought(state.party);
     }
     consumeIncomingItem();
     applyItemToHero(target, item);
@@ -146,7 +149,6 @@ export function handleInventoryDrop(targetIndex) {
       return;
     }
     spendGold(ITEM_COST);
-    triggerBardItemBought(state.party);
     inventory[targetIndex] = item;
     state.shopItems[index] = null;
   } else if (source === "chestItem" || source === "crateDrop") {

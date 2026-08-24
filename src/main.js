@@ -8,7 +8,8 @@ import { renderApp } from "./ui/render.js";
 import { initDungeonCanvas } from "./ui/dungeonCanvas.js";
 import { bindLeaveBehindZones, bindSandboxDeleteZone, bindSellZone } from "./ui/dragDrop.js";
 import { rerollShop, rollShop, setInfiniteGold, setStatMultiplier } from "./systems/shop.js";
-import { toggleDebugMode } from "./systems/debug.js";
+import { toggleDebugMode, syncLevelSystemBoostButton } from "./systems/debug.js";
+import { refreshAllAbilityText } from "./systems/heroes.js";
 import { bindDungeonKeys, proceedToNextFloor, returnToDungeon, startDungeon } from "./systems/dungeon.js";
 import { closeSandbox, setSandboxMode, setSandboxTab, startSandboxBattle } from "./systems/sandbox.js";
 import { returnFromBattle, resetCombat, toggleAutoplay, vcrNext, vcrPrev } from "./systems/combat/index.js";
@@ -16,6 +17,13 @@ import { returnFromBattle, resetCombat, toggleAutoplay, vcrNext, vcrPrev } from 
 function bindClicks() {
   $("debug-toggle-btn")?.addEventListener("click", () => {
     toggleDebugMode();
+  });
+
+  $("level-system-boost-btn")?.addEventListener("click", () => {
+    state.levelSystemBoost = !state.levelSystemBoost;
+    refreshAllAbilityText();
+    syncLevelSystemBoostButton();
+    refresh();
   });
 
   $("sandbox-checkbox")?.addEventListener("change", (event) => {
@@ -68,6 +76,7 @@ export function resetGame() {
   if (infiniteBox) infiniteBox.checked = false;
   const sandboxBox = $("sandbox-checkbox");
   if (sandboxBox) sandboxBox.checked = false;
+  syncLevelSystemBoostButton();
   const sandboxPanel = $("sandbox-panel");
   if (sandboxPanel) sandboxPanel.style.display = "none";
   const slider = $("stat-multiplier-slider");

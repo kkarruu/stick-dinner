@@ -6,6 +6,7 @@ import {
   getHeroMaxMana,
   manaAbilities,
   startOfBattlePhases,
+  tickRage,
   tickVanguard,
 } from "./abilities.js";
 
@@ -30,10 +31,12 @@ function toCombatUnit(hero, sourcePartyIndex, multiplier) {
   const stats = calculateHeroStats(clone, multiplier);
   clone.atk = stats.atk;
   clone.hp = stats.hp;
+  clone.maxHp = stats.maxHp;
   clone.isDeadInCombat = stats.isDead;
   clone.isReanimated = false;
   clone.isMinion = false;
   clone.sourcePartyIndex = sourcePartyIndex;
+  clone.bleed = false;
   return clone;
 }
 
@@ -46,6 +49,8 @@ function toCombatEnemy(template) {
     maxHp: template.maxHp ?? template.hp,
     level: template.level || 1,
     ability: template.ability || null,
+    role: template.role || "FRONT",
+    armor: template.armor || 0,
   };
 }
 
@@ -53,15 +58,55 @@ function enemyExpValue(enemy) {
   return (enemy.atk || 0) + (enemy.maxHp ?? enemy.hp ?? 0);
 }
 
-function makeSplitCube() {
-  return {
-    name: "Small Cube",
-    emoji: "💧",
-    atk: 1,
-    hp: 1,
-    maxHp: 1,
-    level: 1,
-  };
+function makeFaintSpawn(enemy) {
+  const atk = Math.max(1, Math.round((enemy.atk || 1) * 0.5));
+  const hp = Math.max(1, Math.round((enemy.maxHp || enemy.hp || 1) * 0.5));
+  return { name: "Spawn", emoji: "👾", atk, hp, maxHp: hp, level: 1 };
+}
+
+function makeFeintSlime() {
+  return { name: "Slime", emoji: "🟢", atk: 2, hp: 2, maxHp: 2, level: 1 };
+}
+
+function livingIndices(units, multiplier) {
+  const idxs = [];
+  for (let i = 0; i < units.length; i += 1) {
+    if (!isUnitDead(units[i], multiplier)) idxs.push(i);
+  }
+  return idxs;
+}
+
+function applyHpLoss(unit, amount, isMcAttacking) {
+  if (isMcAttacking || unit.isMinion || unit.isReanimated) {
+    unit.hp -= amount;
+  } else {
+    unit.permanentDamage = (unit.permanentDamage || 0) + amount;
+  }
+}
+
+function strikeHero(unit, amount, { ignoreArmor = false, isMcAttacking = false } = {}) {
+  let remaining = Math.max(0, amount);
+  let armorLoss = 0;
+  let hpLoss = 0;
+  if (!ignoreArmor && !isMcAttacking && unit.armor && unit.armor > 0) {
+    armorLoss = Math.min(unit.armor, remaining);
+    unit.armor -= armorLoss;
+    remaining -= armorLoss;
+  }
+  if (remaining > 0) {
+    hpLoss = remaining;
+    applyHpLoss(unit, hpLoss, isMcAttacking);
+  }
+  return { armorLoss, hpLoss };
+}
+
+function markCombatDeath(unit, isMcAttacking, multiplier) {
+  if (!unit || isMcAttacking) return;
+  if (unit.isMinion || unit.isReanimated) {
+    if (unit.hp <= 0) unit.isDeadInCombat = true;
+  } else if (isHeroDead(unit, multiplier)) {
+    unit.isDeadInCombat = true;
+  }
 }
 
 function sortDeadLeft(units, multiplier) {
@@ -80,14 +125,6 @@ function rightmostLiving(units, multiplier) {
   return null;
 }
 
-function applyHpLoss(unit, amount, isMcAttacking) {
-  if (isMcAttacking || unit.isMinion || unit.isReanimated) {
-    unit.hp -= amount;
-  } else {
-    unit.permanentDamage = (unit.permanentDamage || 0) + amount;
-  }
-}
-
 function collectPartyUpdates(combatPlayer) {
   const updates = [];
   for (const unit of combatPlayer) {
@@ -98,6 +135,7 @@ function collectPartyUpdates(combatPlayer) {
       armor: unit.armor || 0,
       currentMana: unit.currentMana || 0,
       currentEnergy: unit.currentEnergy || 0,
+      currentRage: unit.currentRage || 0,
       perk: unit.perk ? structuredClone(unit.perk) : null,
     });
   }
@@ -115,12 +153,7 @@ function thiefGold(combatPlayer) {
   return gold;
 }
 
-export function simulateBattle({
-  playerParty,
-  enemies,
-  manaMode,
-  statMultiplier,
-}) {
+export function simulateBattle({ playerParty, enemies, manaMode, statMultiplier }) {
   const frames = [];
   const combatPlayer = [];
   const packed = [];
@@ -139,6 +172,11 @@ export function simulateBattle({
   enemies.forEach((template) => {
     if (template && template.hp > 0) combatEnemy.push(toCombatEnemy(template));
   });
+  combatEnemy.sort((a, b) => {
+    const ar = a.role === "BACK" ? 1 : 0;
+    const br = b.role === "BACK" ? 1 : 0;
+    return ar - br;
+  });
 
   let mindControlledMonster = null;
   let battleExp = 0;
@@ -151,8 +189,11 @@ export function simulateBattle({
   };
 
   const spawnSplitsIfNeeded = (enemy) => {
-    if (enemy?.ability !== "SPLIT") return;
-    for (let s = 0; s < 3; s += 1) combatEnemy.unshift(makeSplitCube());
+    if (enemy?.ability === "FEINT" || enemy?.ability === "SPLIT") {
+      for (let s = 0; s < 3; s += 1) combatEnemy.unshift(makeFeintSlime());
+      return;
+    }
+    if (enemy?.ability === "FAINT") combatEnemy.unshift(makeFaintSpawn(enemy));
   };
 
   const killEnemyIfDead = (index = 0) => {
@@ -175,6 +216,10 @@ export function simulateBattle({
         enemyFrontDmg: null,
         specificEnemyIdx: -1,
         specificEnemyDmg: null,
+        specificPlayerIdx: -1,
+        specificPlayerDmg: null,
+        playerHits: null,
+        enemyHits: null,
         lungePlayer: false,
         lungeEnemy: false,
         pulseIdx: -1,
@@ -202,6 +247,7 @@ export function simulateBattle({
     isCorpse: (unit) => isCorpse(unit, statMultiplier),
     emit,
     killEnemyIfDead,
+    applyHpLoss,
   };
 
   const finish = (message, goldReward, outcome) => {
@@ -243,8 +289,9 @@ export function simulateBattle({
   for (let turn = 0; turn < MAX_BATTLE_TURNS; turn += 1) {
     sortDeadLeft(combatPlayer, statMultiplier);
     for (let i = combatPlayer.length - 1; i >= 0; i -= 1) {
-      const unit = combatPlayer[i];
-      if (unit.isMinion && isUnitDead(unit, statMultiplier)) combatPlayer.splice(i, 1);
+      if (combatPlayer[i].isMinion && isUnitDead(combatPlayer[i], statMultiplier)) {
+        combatPlayer.splice(i, 1);
+      }
     }
 
     const living = combatPlayer.filter((unit) => !isUnitDead(unit, statMultiplier));
@@ -257,6 +304,16 @@ export function simulateBattle({
     if (combatEnemy.length === 0 && !mindControlledMonster) {
       return finish("Victory!", BATTLE_GOLD.victory, "victory");
     }
+
+    const bleedHits = [];
+    combatPlayer.forEach((unit, idx) => {
+      if (!unit.bleed || isUnitDead(unit, statMultiplier)) return;
+      if (Math.random() >= 0.5) return;
+      applyHpLoss(unit, 1, false);
+      markCombatDeath(unit, false, statMultiplier);
+      bleedHits.push({ idx, dmg: 1 });
+    });
+    if (bleedHits.length) emit({ playerHits: bleedHits, delay: DELAY.ability });
 
     if (manaMode) {
       for (let idx = 0; idx < combatPlayer.length; idx += 1) {
@@ -295,41 +352,87 @@ export function simulateBattle({
       isMcAttacking || pFront.isMinion || pFront.isReanimated
         ? { atk: pFront.atk }
         : calculateHeroStats(pFront, statMultiplier);
-    const dmgToEnemy = stats.atk;
+    let dmgToEnemy = stats.atk;
 
     if (!isMcAttacking && pFront.perk?.name === "Iron Chestplate") {
       rawDmgToPlayer = Math.max(0, rawDmgToPlayer - 2);
     }
 
-    let armorLoss = 0;
-    let hpLoss = 0;
-    if (!isMcAttacking && pFront.armor && pFront.armor > 0) {
-      armorLoss = Math.min(pFront.armor, rawDmgToPlayer);
-      pFront.armor -= armorLoss;
-      const leftover = rawDmgToPlayer - armorLoss;
-      if (leftover > 0) {
-        hpLoss = leftover;
-        applyHpLoss(pFront, hpLoss, isMcAttacking);
-      }
+    const ignoreArmor = eFront.ability === "CRUSH";
+    const livingIdxs = livingIndices(combatPlayer, statMultiplier);
+    let targetIdxs = [];
+    if (isMcAttacking) {
+      targetIdxs = [];
+    } else if (eFront.ability === "SNEAK" && livingIdxs.length) {
+      targetIdxs = [livingIdxs[0]];
+    } else if (eFront.ability === "REACH" && livingIdxs.length) {
+      targetIdxs = [livingIdxs[livingIdxs.length - 1]];
+      if (livingIdxs.length > 1) targetIdxs.push(livingIdxs[livingIdxs.length - 2]);
     } else {
-      hpLoss = rawDmgToPlayer;
-      applyHpLoss(pFront, hpLoss, isMcAttacking);
+      targetIdxs = [combatPlayer.indexOf(pFront)];
     }
 
-    tickVanguard(combatPlayer, {
-      manaMode,
-      isMcAttacking,
-      hpLoss,
-      isUnitDead: (unit) => isUnitDead(unit, statMultiplier),
-    });
+    let frontArmorLoss = 0;
+    let frontHpLoss = 0;
+    const extraPlayerHits = [];
+    let totalHpDealt = 0;
+    const frontIdx = isMcAttacking ? -1 : combatPlayer.indexOf(pFront);
 
+    const hitUnit = (unit, idx) => {
+      const struck = strikeHero(unit, rawDmgToPlayer, { ignoreArmor, isMcAttacking });
+      totalHpDealt += struck.hpLoss;
+      if (!isMcAttacking && eFront.ability === "BLEED" && struck.hpLoss > 0) unit.bleed = true;
+      if (!isMcAttacking && eFront.ability === "MANA_DRAIN" && unit.hasMana) unit.currentMana = 0;
+      tickVanguard(combatPlayer, {
+        manaMode,
+        isMcAttacking,
+        hpLoss: struck.hpLoss,
+        damagedUnit: unit,
+        isUnitDead: (member) => isUnitDead(member, statMultiplier),
+      });
+      tickRage(unit, { manaMode, isMcAttacking, emit });
+      if (idx === frontIdx || isMcAttacking) {
+        frontArmorLoss += struck.armorLoss;
+        frontHpLoss += struck.hpLoss;
+      } else if (idx >= 0) {
+        extraPlayerHits.push({ idx, dmg: struck.hpLoss + struck.armorLoss });
+      }
+    };
+
+    if (isMcAttacking) {
+      hitUnit(pFront, -1);
+    } else {
+      targetIdxs.forEach((idx) => {
+        const unit = combatPlayer[idx];
+        if (unit && !isUnitDead(unit, statMultiplier)) hitUnit(unit, idx);
+      });
+    }
+
+    if (eFront.ability === "LIFESTEAL" && totalHpDealt > 0) {
+      eFront.hp = Math.min(eFront.maxHp ?? eFront.hp, eFront.hp + totalHpDealt);
+    }
+
+    if ((eFront.armor || 0) > 0 && dmgToEnemy > 0) {
+      const used = Math.min(eFront.armor, dmgToEnemy);
+      eFront.armor -= used;
+      dmgToEnemy -= used;
+    }
+    if (dmgToEnemy > 0 && eFront.ability === "GROW") eFront.atk += 1;
     eFront.hp -= dmgToEnemy;
+
+    if (!isMcAttacking && eFront.ability === "THORNS") {
+      const thorns = strikeHero(pFront, 1, { ignoreArmor: false, isMcAttacking: false });
+      frontHpLoss += thorns.hpLoss;
+      frontArmorLoss += thorns.armorLoss;
+      tickRage(pFront, { manaMode, isMcAttacking: false, emit });
+    }
 
     emit({ lungePlayer: true, lungeEnemy: true, delay: DELAY.lunge });
     emit({
-      playerFrontArmorLoss: armorLoss > 0 ? armorLoss : null,
-      playerFrontHpLoss: hpLoss > 0 ? hpLoss : null,
-      enemyFrontDmg: dmgToEnemy,
+      playerFrontArmorLoss: frontArmorLoss > 0 ? frontArmorLoss : null,
+      playerFrontHpLoss: frontHpLoss > 0 ? frontHpLoss : null,
+      enemyFrontDmg: stats.atk,
+      playerHits: extraPlayerHits.length ? extraPlayerHits : null,
       delay: DELAY.clash,
     });
 
@@ -342,14 +445,12 @@ export function simulateBattle({
       } else if (mindControlledMonster.turnsLeft <= 0) {
         mindControlledMonster = null;
       }
-    } else if (pFront.isMinion || pFront.isReanimated) {
-      if (pFront.hp <= 0) pFront.isDeadInCombat = true;
-    } else if (isHeroDead(pFront, statMultiplier)) {
-      pFront.isDeadInCombat = true;
+    } else {
+      targetIdxs.forEach((idx) => markCombatDeath(combatPlayer[idx], false, statMultiplier));
+      markCombatDeath(pFront, false, statMultiplier);
     }
 
     killEnemyIfDead(0);
-
     emit({ delay: DELAY.turnGap });
   }
 
